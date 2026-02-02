@@ -1,0 +1,28 @@
+# creates csv file automatically to log events
+
+import csv
+
+class SimulationLogger:
+    def __init__(self, filename="simulation_log.csv"):
+        self.file = open(filename, 'w', newline="")
+        self.writer = csv.writer(self.file)
+        self.writer.writerow([
+            "minute",
+            "temperature"
+            "risk_level",
+            "distance_remaining",
+            "destination"
+        ])
+    
+    def log(self, minute, temp, risk, distance, destination):
+        self.writer.writerow([
+            minute,
+            temp,
+            risk,
+            distance,
+            destination
+        ])
+    
+    def close(self):
+        self.file.close()
+        
