@@ -40,7 +40,7 @@ if reroute cooldown is satisfied then
         candidate_hospitals = nearby hospitals excluding start and current destination
         best_hospital, candidate_cost = select_optimal_hospital(...)
 
-        if current_cost is undefined or candidate_cost improves current route sufficiently then
+        if current_cost is undefined or candidate_cost provides meaningful improvement then
             update transport destination
             update reroute state
         end if
@@ -53,4 +53,5 @@ if transport_state.status == ARRIVED then
     terminate simulation
 end if
 
-return latest system state to dashboard
+return latest state for dashboard update
+                   
