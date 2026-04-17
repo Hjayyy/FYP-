@@ -19,7 +19,7 @@ while open set is not empty do
     for each neighbour of current do
         risk_multiplier = function of risk level
         urgency_penalty = function of remaining safe time
-        ml_penalty = escalation probability factor
+        ml_penalty = function of escalation probability
 
         edge_cost =
             distance
