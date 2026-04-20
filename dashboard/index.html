@@ -1,0 +1,884 @@
+<!-- Real-time dashboard for monitoring transport state, temperature, risk,
+escalation probability, and routing outcomes streamed from the FastAPI backend. -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Organ Transplant Monitoring Dashboard</title>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<style>
+
+/* Global */
+body{
+margin:0;
+font-family:"Segoe UI",Arial;
+background:#eef2f7;
+color:#2c3e50;
+}
+
+/* Alert banners */
+#alert-container{
+position:fixed;
+top:0;
+width:100%;
+z-index:1000;
+}
+
+#reroute-alert,
+#traffic-alert,
+#completion-banner{
+display:none;
+text-align:center;
+font-weight:bold;
+padding:10px;
+}
+
+#reroute-alert{
+background:#ffdddd;
+color:#b00020;
+border-bottom:3px solid #b00020;
+}
+
+#traffic-alert{
+background:#fff4cc;
+color:#8a6d00;
+border-bottom:3px solid #e0a800;
+}
+
+#completion-banner{
+background:#e6f4ea;
+color:#1e7e34;
+border-bottom:3px solid #28a745;
+}
+#simulation-summary{
+background:#f7f9fc;
+padding:10px;
+border-radius:6px;
+border-left:4px solid #2a5298;
+margin-top:10px;
+}
+/* Header */
+.header{
+margin-top:50px;
+background:linear-gradient(90deg,#1f3c88,#2a5298);
+color:white;
+padding:18px 25px;
+border-bottom:3px solid #1b2e63;
+}
+
+.header-title{
+font-size:22px;
+font-weight:600;
+letter-spacing:0.5px;
+}
+
+.header-meta{
+margin-top:6px;
+font-size:14px;
+opacity:0.9;
+}
+
+/* System status bar */
+#system-status-bar{
+background:#1f2937;
+color:white;
+padding:10px 25px;
+font-size:14px;
+display:flex;
+gap:25px;
+border-bottom:2px solid #0f172a;
+}
+
+/* grid */
+.grid-container{
+display:grid;
+grid-template-columns:1fr 2fr 1fr;
+gap:20px;
+padding:20px;
+}
+
+/* panels */
+.panel{
+background:white;
+border-radius:10px;
+padding:18px;
+box-shadow:0 6px 18px rgba(0,0,0,0.08);
+border:1px solid #e2e8f0;
+}
+
+/* status */
+.status-dot{
+display:inline-block;
+width:10px;
+height:10px;
+border-radius:50%;
+margin-right:6px;
+}
+.dot-safe{background:green;}
+.dot-risk{background:orange;}
+.dot-critical{background:red;}
+
+.ai-active{
+color:#6a1b9a;
+font-weight:bold;
+}
+
+.hospital-label{
+background:white;
+border:1px solid #2a5298;
+color:#2a5298;
+font-weight:bold;
+padding:2px 6px;
+border-radius:4px;
+font-size:12px;
+}
+
+/* metrics size */
+.metric{
+margin:10px 0;
+font-size:15px;
+padding:6px 8px;
+border-radius:6px;
+background:#f7f9fc;
+border-left:4px solid #2a5298;
+}
+
+#temp-value{
+font-weight:bold;
+color:#6a1b9a;
+}
+
+/* map size */
+#map{
+height:400px;
+}
+
+/* buttons */
+button{
+padding:8px 14px;
+margin-top:10px;
+margin-right:6px;
+border:none;
+border-radius:6px;
+background:#2a5298;
+color:white;
+font-weight:500;
+cursor:pointer;
+transition:0.2s;
+}
+button:hover{
+background:#1f3c88;
+transform:translateY(-1px);
+}
+
+/* ML probability colours */
+.ml-low{color:rgb(22,130,22);font-weight:bold;}
+.ml-medium{color:orange;font-weight:bold;}
+.ml-high{color:red;font-weight:bold;}
+.ml-critical{color:rgb(142,29,29);font-weight:bold;}
+
+/* Risk Colour states style  */
+.risk-low{background:#e8f5e9;border-left:5px solid #2e7d32;}
+.risk-moderate{background:#fffde7;border-left:5px solid #f9a825;}
+.risk-high{background:#fff3e0;border-left:5px solid #ef6c00;}
+.risk-critical{background:#ffebee;border-left:5px solid #c62828;}
+
+/* Risk summary style */
+#risk-summary{
+padding:12px;
+border-radius:6px;
+margin-bottom:12px;
+font-size:14px;
+}
+
+/* Action panel style */
+#actions{
+padding:12px;
+background:#fff8e6;
+border-left:5px solid #f39c12;
+border-radius:6px;
+margin-bottom:12px;
+font-size:14px;
+}
+
+/* Event log style */
+#log{
+max-height:260px;
+overflow-y:auto;
+font-size:13px;
+background:#fafafa;
+border-radius:6px;
+padding:8px;
+border:1px solid #e0e6ef;
+}
+
+.destination-highlight{
+background:#fff3cd;
+padding:3px 6px;
+border-radius:4px;
+border:2px solid #f39c12;
+transition:0.4s;
+}
+.bottom-panel{
+    margin: 0 20px 20px 20px;
+    padding: 15px;
+    background:white;
+    border-radius:10px;
+    box-shadow:0 6px 18px rgba(0,0,0,0.08);
+    border:1px solid #e2e8f0;
+    font-size:14px;
+    max-width: calc(100% - 40px);
+}
+</style>
+</head>
+<body>
+
+<div id="alert-container">
+<div id="reroute-alert">
+⚠ ROUTE CHANGED: HIGH RISK DETECTED
+</div>
+
+<div id="traffic-alert">
+⚠ TRAFFIC CONGESTION: ROUTE DELAY
+</div>
+<div id="completion-banner"></div>
+</div>
+
+<div class="header">
+<div class="header-title">
+ORGAN TRANSPLANT MONITORING DASHBOARD
+</div>
+
+<div class="header-meta">
+Transplant ID: <span id="transport-id">OT-2026-014</span> |
+Organ: <span id="organ-type">Heart</span> |
+Status:
+<span id="status-dot" class="status-dot dot-safe"></span>
+<span id="status-indicator">SAFE</span>
+<span id="ai-indicator" style="margin-left:10px;font-weight:bold;"></span>
+</div>
+</div>
+
+<div id="system-status-bar">
+<div><strong>System:</strong> <span id="system-state">Idle</span></div>
+<div><strong>Transport Minute:</strong> <span id="status-minute">-</span></div>
+<div><strong>Risk Level:</strong> <span id="status-risk">-</span></div>
+<div><strong>ML Escalation:</strong> <span id="status-ml">-</span></div>
+</div>
+
+<div class="grid-container">
+
+<!-- Left panel -->
+<div class="panel">
+<h3>Live Sensor Status</h3>
+<div class="metric">Traffic State: <span id="traffic-state">-</span></div>
+<div class="metric">Traffic Delay: <span id="traffic-delay">-</span> min</div>
+
+<div class="metric">
+Organ:
+<select id="organ-select">
+<option value="heart">Heart</option>
+<option value="kidney">Kidney</option>
+<option value="lungs">Lungs</option>
+</select>
+</div>
+
+<div class="metric">
+Start Location:
+<select id="start-select">
+<option value="St Thomas' Hospital">St Thomas' Hospital</option>
+<option value="King's College Hospital">King's College Hospital</option>
+<option value="Royal London Hospital">Royal London Hospital</option>
+<option value="Chelsea & Westminster Hospital">Chelsea & Westminster Hospital</option>
+<option value="Hammersmith Hospital">Hammersmith Hospital</option>
+<option value="Queen's Hospital Romford">Queen's Hospital Romford</option>
+<option value="King George Hospital Ilford">King George Hospital Ilford</option>
+<option value="Basildon University Hospital">Basildon University Hospital</option>
+<option value="Broomfield Hospital Chelmsford">Broomfield Hospital Chelmsford</option>
+<option value="Darent Valley Hospital">Darent Valley Hospital</option>
+<option value="John Radcliffe Hospital">John Radcliffe Hospital</option>
+<option value="Addenbrooke's Hospital">Addenbrooke's Hospital</option>
+<option value="University Hospital Coventry">University Hospital Coventry</option>
+<option value="Queen's Medical Centre">Queen's Medical Centre</option>
+<option value="Southampton General Hospital">Southampton General Hospital</option>
+<option value="Leeds General Infirmary">Leeds General Infirmary</option>
+<option value="Royal Victoria Infirmary">Royal Victoria Infirmary</option>
+</select>
+</div>
+
+<div class="metric">
+Destination:
+<select id="hospital-select">
+<option value="St Thomas' Hospital">St Thomas' Hospital</option>
+<option value="King's College Hospital">King's College Hospital</option>
+<option value="Royal London Hospital">Royal London Hospital</option>
+<option value="Chelsea & Westminster Hospital">Chelsea & Westminster Hospital</option>
+<option value="Hammersmith Hospital">Hammersmith Hospital</option>
+<option value="Queen's Hospital Romford">Queen's Hospital Romford</option>
+<option value="King George Hospital Ilford">King George Hospital Ilford</option>
+<option value="Basildon University Hospital">Basildon University Hospital</option>
+<option value="Broomfield Hospital Chelmsford">Broomfield Hospital Chelmsford</option>
+<option value="Darent Valley Hospital">Darent Valley Hospital</option>
+<option value="John Radcliffe Hospital">John Radcliffe Hospital</option>
+<option value="Addenbrooke's Hospital">Addenbrooke's Hospital</option>
+<option value="University Hospital Coventry">University Hospital Coventry</option>
+<option value="Queen's Medical Centre">Queen's Medical Centre</option>
+<option value="Southampton General Hospital">Southampton General Hospital</option>
+<option value="Leeds General Infirmary">Leeds General Infirmary</option>
+<option value="Royal Victoria Infirmary">Royal Victoria Infirmary</option>
+</select>
+</div>
+
+<div class="metric">Temperature: <span id="temp-value">-</span> °C</div>
+
+
+<div class="metric">Remaining Safe Minutes: <span id="remaining">-</span></div>
+<div class="metric">Escalation Probability: <span id="prob">-</span></div>
+<div class="metric">Distance Remaining: <span id="distance">-</span> km</div>
+<div class="metric">Destination: <span id="destination">-</span></div>
+
+<button onclick="startSimulation()">Start</button>
+<button onclick="pauseSimulation()">Pause</button>
+<button onclick="resetSimulation()">Reset</button>
+
+<h4>Temperature Trend</h4>
+<canvas id="chart"></canvas>
+</div>
+
+<!-- Map panel -->
+<div class="panel">
+<h3>Transport Map</h3>
+<div id="map"></div>
+</div>
+
+<!-- Right panel -->
+<div class="panel">
+<h3>Risk Summary</h3>
+
+<div id="risk-summary">
+Status: - <br>
+Remaining Safe Minutes: - <br>
+</div>
+
+<h3>Recommended Actions</h3>
+<div id="actions">
+Waiting for system data...
+</div>
+
+<h3>Event Log</h3>
+<div id="log"></div>
+</div>
+
+
+</div>
+<div class="bottom-panel">
+<h3>Previous Simulation Summary</h3>
+<div id="simulation-summary">
+No completed simulation yet.
+</div>
+</div>
+<script>
+
+let socket = new WebSocket("ws://127.0.0.1:8000/ws");
+socket.onopen = () => console.log("WebSocket connected");
+socket.onerror = (e) => console.error("WebSocket error:", e);
+socket.onclose = () => console.warn("WebSocket closed");
+
+/* chart */
+let ctx = document.getElementById("chart").getContext("2d");
+let chart = new Chart(ctx, {
+    type: "line",
+    data: {
+        labels: [],
+        datasets: [{
+            label: "Temperature (°C)",
+            data: [],
+            borderColor: "#2a5298",
+            tension: 0.3,
+            pointRadius: 2,
+            fill: false
+        }]
+    }
+});
+/* leaflet map */
+let map = L.map("map").setView([51.5074, -0.1278], 10);
+L.tileLayer(
+    "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    { attribution: "© OpenStreetMap contributors" }
+).addTo(map);
+let defaultIcon = L.icon({
+    iconUrl: "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-blue.png",
+    iconSize: [25,41],
+    iconAnchor: [12,41]
+});
+let highlightIcon = L.icon({
+    iconUrl: "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-red.png",
+    iconSize: [25,41],
+    iconAnchor: [12,41]
+});
+
+/* All hospital markers */
+let hospitals = [
+    { name: "St Thomas' Hospital", lat: 51.4980, lon: -0.1187 },
+    { name: "King's College Hospital", lat: 51.4681, lon: -0.0931 },
+    { name: "Royal London Hospital", lat: 51.5194, lon: -0.0596 },
+    { name: "Chelsea & Westminster Hospital", lat: 51.4846, lon: -0.1804 },
+    { name: "Hammersmith Hospital", lat: 51.5165, lon: -0.2339 },
+
+    { name: "Queen's Hospital Romford", lat: 51.5760, lon: 0.1830 },
+    { name: "King George Hospital Ilford", lat: 51.5756, lon: 0.0960 },
+    { name: "Basildon University Hospital", lat: 51.5586, lon: 0.4558 },
+    { name: "Broomfield Hospital Chelmsford", lat: 51.7760, lon: 0.4680 },
+    { name: "Darent Valley Hospital", lat: 51.4456, lon: 0.2190 },
+
+    { name: "John Radcliffe Hospital", lat: 51.7634, lon: -1.2195 },
+    { name: "Addenbrooke's Hospital", lat: 52.1733, lon: 0.1390 },
+    { name: "University Hospital Coventry", lat: 52.4210, lon: -1.4675 },
+    { name: "Queen's Medical Centre", lat: 52.9440, lon: -1.1850 },
+    { name: "Southampton General Hospital", lat: 50.9324, lon: -1.4322 },
+    { name: "Leeds General Infirmary", lat: 53.8013, lon: -1.5486 },
+    { name: "Royal Victoria Infirmary", lat: 54.9805, lon: -1.6174 },
+];
+
+let hospitalMarkers = {}
+hospitals.forEach(h => {
+    let marker = L.marker([h.lat, h.lon], { icon: defaultIcon }).addTo(map)
+    marker.bindPopup(h.name)
+    marker.bindTooltip(h.name, {
+        permanent: true,
+        direction: "top",
+        offset: [0,-10],
+        className: "hospital-label"
+    })
+
+    hospitalMarkers[h.name] = marker
+})
+
+/* the vehicle marker icon */ 
+let ambulanceIcon = L.icon({
+iconUrl: "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-black.png",
+iconSize: [25,41],
+iconAnchor: [12,41],
+popupAnchor: [1,-34],
+shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png",
+shadowSize: [41,41]
+});
+
+let vehicleMarker = L.marker(
+[51.5074, -0.1278],
+{icon: ambulanceIcon}
+).addTo(map);
+
+// transport id
+let currentTransportID = "OT-2026-014";
+
+let lastPosition = [51.5074, -0.1278];
+let currentHighlighted = null;
+let routeLine = null;
+let currentAnimation = null;
+let isRunning = false;
+
+function highlightHospital(name) {
+    // Reset previous
+    if (currentHighlighted && hospitalMarkers[currentHighlighted]) {
+        hospitalMarkers[currentHighlighted].setIcon(defaultIcon)
+    }
+    // Highlight new
+    if (hospitalMarkers[name]) {
+        hospitalMarkers[name].setIcon(highlightIcon)
+        currentHighlighted = name
+    }
+}
+
+function drawRoute(startCoords, endCoords, shouldZoom = false) {
+    if (routeLine) {
+        map.removeLayer(routeLine);
+    }
+    routeLine = L.polyline([startCoords, endCoords], {
+        color: "#2a5298",
+        weight: 4,
+        opacity: 0.8,
+    }).addTo(map);
+
+    if (shouldZoom) {
+        map.fitBounds([startCoords, endCoords], {
+            padding: [40, 40],
+            maxZoom: 11
+        });
+    }
+}
+
+let currentStart = [51.5074, -0.1278]; // persists across runs
+let firstUpdate = true; // prevents jump on first frame
+
+/* Websocket */
+socket.onmessage = function(event) {
+    let data;
+    try {
+        data = JSON.parse(event.data);
+    } catch(e) {
+        console.error("Invalid JSON received:", event.data);
+        return;
+    }
+    if(!data) return;
+    /* Reroute alert banner */
+    if (data.rerouted) {
+        let alert = document.getElementById("reroute-alert");
+        alert.style.display = "block";
+        setTimeout(() => { alert.style.display = "none"; }, 5000);
+    }
+
+    /* traffic alert banner */
+    if (data.traffic_state && data.traffic_state !== "NORMAL") {
+        let traffic = document.getElementById("traffic-alert");
+        traffic.innerText = `⚠ TRAFFIC ${data.traffic_state}: +${data.traffic_delay_minutes} min delay`;
+        traffic.style.display = "block";
+        setTimeout(() => { traffic.style.display = "none"; }, 4000);
+    }
+
+    /* System status bar */
+    document.getElementById("system-state").innerText =
+    data.completed ? "Completed" : (data.minute !== undefined ? "Running" : "Idle");
+    document.getElementById("status-minute").innerText =
+    data.minute ?? "-";
+    document.getElementById("status-risk").innerText =
+    data.risk_level ?? "-";
+    document.getElementById("status-ml").innerText =
+    data.escalation_prob != null ? data.escalation_prob.toFixed(2) : "-";
+
+    document.getElementById("traffic-state").innerText =
+        data.traffic_state ?? "-";
+
+    document.getElementById("traffic-delay").innerText =
+        data.traffic_delay_minutes ?? "-";
+
+    /* Completion banner */
+    let banner = document.getElementById("completion-banner");
+    if (data.completed) {
+        isRunning = false;
+        banner.style.display = "block";
+        if (data.failure_reason === "ARRIVED") {
+            banner.innerText = "DESTINATION REACHED: ORGAN SUCCESSFULLY DELIVERED";
+        } else if (data.failure_reason === "VIABILITY_EXCEEDED") {
+            banner.innerText = "ORGAN OUTSIDE VIABILITY WINDOW";
+        } else if (data.failure_reason === "MAX_TRANSPORT_EXCEEDED") {
+            banner.innerText = "TRANSPORT TIME LIMIT EXCEEDED";
+        }
+        setTimeout(() => {
+            banner.style.display = "none";
+        }, 5000);
+
+            updateSummary(data);
+        
+    }
+    /* Sensor values */
+    document.getElementById("temp-value").innerText =
+    data.temperature?.toFixed(2) ?? "-";
+    document.getElementById("remaining").innerText =
+        data.remaining_safe_minutes ?? "-";
+    document.getElementById("distance").innerText =
+        data.distance_remaining_km != null ? data.distance_remaining_km.toFixed(2) : "-";
+    let destEl = document.getElementById("destination");
+
+    if (data.destination_name) {
+        destEl.innerText = data.destination_name;
+    }
+
+    if (data.destination_name && data.destination_name !== currentHighlighted) {
+        highlightHospital(data.destination_name)
+    }
+
+    if (data.rerouted) {
+        destEl.classList.add("destination-highlight");
+        setTimeout(() => {
+            destEl.classList.remove("destination-highlight");
+        }, 4000);
+    }
+
+    if (data.rerouted && data.latitude != null && data.longitude != null && data.destination_name) {
+        let rerouteDestination = hospitals.find(h => h.name === data.destination_name);
+        if (rerouteDestination) {
+            drawRoute(
+                [data.latitude, data.longitude],
+                [rerouteDestination.lat, rerouteDestination.lon],
+                false
+            );
+        }
+    }
+
+    /* ML probability */
+    let probEl = document.getElementById("prob");
+    if (data.escalation_prob != null) {
+        let p = data.escalation_prob;
+        probEl.innerText = p.toFixed(2);
+        probEl.className = "";
+
+        if (p >= 0.9) probEl.classList.add("ml-critical");
+        else if (p >= 0.75) probEl.classList.add("ml-high");
+        else if (p >= 0.5) probEl.classList.add("ml-medium");
+        else probEl.classList.add("ml-low");
+    } else {
+        probEl.innerText = "-";
+        probEl.className = "";
+    }
+    /* AI indicator */
+    let aiIndicator = document.getElementById("ai-indicator");
+    if (data.escalation_prob != null && data.escalation_prob >= 0.75) {
+        aiIndicator.innerText = "AI Prediction Active";
+        aiIndicator.className = "ai-active";
+    } else {
+        aiIndicator.innerText = "";
+    }
+    /* chart */
+    if (data.minute != null && data.temperature != null) {
+        chart.data.labels.push(data.minute);
+        chart.data.datasets[0].data.push(data.temperature);
+
+        if (chart.data.labels.length > 60) {
+            chart.data.labels.shift();
+            chart.data.datasets[0].data.shift();
+        }
+        chart.update();
+    }
+        /* map follow for smooth movement */
+        if (data.latitude != null && data.longitude != null) {
+            let newPos = [data.latitude, data.longitude];
+
+            if (currentAnimation) {
+                clearInterval(currentAnimation);
+            }
+
+            // First live update: snap immediately
+            if (!lastPosition || lastPosition[0] === currentStart[0]) {
+                vehicleMarker.setLatLng(newPos);
+                lastPosition = newPos;
+            } else {
+                let steps = 6;
+                let step = 0;
+
+                let startLat = lastPosition[0];
+                let startLon = lastPosition[1];
+                let latDiff = (newPos[0] - startLat) / steps;
+                let lonDiff = (newPos[1] - startLon) / steps;
+
+                currentAnimation = setInterval(() => {
+                    step++;
+                    let intermediate = [
+                        startLat + latDiff * step,
+                        startLon + lonDiff * step
+                    ];
+
+                    vehicleMarker.setLatLng(intermediate);
+
+                    if (step >= steps) {
+                        clearInterval(currentAnimation);
+                        currentAnimation = null;
+                        lastPosition = newPos;
+                        map.panTo(newPos, { animate: true, duration: 0.5 });
+                    }
+                }, 30);
+        }}
+
+    /* status indicator */
+    let status = data.risk_level;
+    let label = "SAFE";
+    let dot = document.getElementById("status-dot");
+    dot.className = "status-dot";
+
+    if (status === "LOW") {
+        label = "SAFE";
+        dot.classList.add("dot-safe");
+    } else if (status === "MODERATE" || status === "HIGH") {
+        label = "AT RISK";
+        dot.classList.add("dot-risk");
+    } else if (status === "CRITICAL") {
+        label = "CRITICAL";
+        dot.classList.add("dot-critical");
+    }
+    document.getElementById("status-indicator").innerText = label;
+
+    /* Risk summary panel */
+    let riskPanel = document.getElementById("risk-summary")
+    riskPanel.className = ""
+    if(data.risk_level === "LOW") riskPanel.classList.add("risk-low")
+    else if(data.risk_level === "MODERATE") riskPanel.classList.add("risk-moderate")
+    else if(data.risk_level === "HIGH") riskPanel.classList.add("risk-high")
+    else if(data.risk_level === "CRITICAL") riskPanel.classList.add("risk-critical")
+
+    riskPanel.innerHTML =
+    `<strong>Status:</strong> ${data.risk_level}<br>
+    <strong>Remaining Safe Minutes:</strong> ${data.remaining_safe_minutes}<br>
+    <strong>Escalation Probability:</strong> ${data.escalation_prob?.toFixed(2) ?? "-"}`
+   
+    /* Recommended Actions for when temperature breaches occur */
+   let actions = "";
+
+    if (data.risk_level === "LOW") {
+        actions = "• Continue transport under current conditions<br>• Maintain routine monitoring";
+    } else if (data.risk_level === "MODERATE") {
+        actions = "• Increase monitoring frequency<br>• Check cooling stability and delay progression";
+    } else if (data.risk_level === "HIGH") {
+        actions = "• Alert transplant coordination team<br>• Prepare cooling intervention and assess rerouting need";
+    } else if (data.risk_level === "CRITICAL") {
+        actions = "• Immediate intervention required<br>• Prioritise rerouting to the safest available hospital";
+    } else {
+        actions = "Waiting for system data...";
+    }
+
+    document.getElementById("actions").innerHTML = actions;
+
+    /* Event log */
+    let log = document.getElementById("log");
+    if(data.minute !== undefined){
+    log.innerHTML = `<div>Minute ${data.minute} – ${data.risk_level}</div>` + log.innerHTML;
+    }
+    if (log.children.length > 50) {
+        log.removeChild(log.lastChild);
+    }
+};
+function updateSummary(data){
+    let summary = document.getElementById("simulation-summary");
+    let outcome = "";
+    if(data.failure_reason === "ARRIVED"){
+        outcome = "Delivered Successfully";
+    } else if(data.failure_reason === "VIABILITY_EXCEEDED"){
+        outcome = "Viability Window Exceeded";
+    } else if(data.failure_reason === "MAX_TRANSPORT_EXCEEDED"){
+        outcome = "Transport Time Limit Exceeded";
+    }
+
+    /* Previoous summary panel display */
+    summary.innerHTML = `
+        <strong>Transport ID:</strong> ${currentTransportID}<br>
+        <strong>Organ:</strong> ${document.getElementById("organ-type").innerText}<br>
+        <strong>Start Hospital:</strong> ${data.start_name}<br>
+        <strong>Final Destination:</strong> ${data.destination_name}<br>
+        <strong>Transport Time:</strong> ${data.minute} minutes<br>
+        <strong>Outcome:</strong> ${outcome}<br>
+        <strong>Remaining Safe Minutes:</strong> ${data.remaining_safe_minutes}<br>
+        <strong>ML Escalation Probability:</strong> ${data.escalation_prob?.toFixed(2) ?? "-"}
+    `;
+}
+
+function generateTransportID(){
+    let num = Math.floor(Math.random()*900 + 100);
+    return "OT-2026-" + num;
+}
+/* controls */
+function startSimulation() {
+
+    if (isRunning) return;   // prevent spam clicking
+
+    let organ = document.getElementById("organ-select").value
+    let start = document.getElementById("start-select").value
+    let hospital = document.getElementById("hospital-select").value
+    if(start === hospital){
+        alert("Start and destination hospitals cannot be the same.");
+        return;
+    }
+
+    isRunning = true;
+
+    // Shows the loading state
+    document.getElementById("system-state").innerText = "Starting...";
+
+    if (routeLine) {
+        map.removeLayer(routeLine);
+        routeLine = null;
+    }
+
+    document.getElementById("organ-type").innerText =
+        organ.charAt(0).toUpperCase() + organ.slice(1)
+
+    let selectedHospital = hospitals.find(h => h.name === start)
+    let destinationHospital = hospitals.find(h => h.name === hospital)
+
+    if (selectedHospital) {
+        currentStart = [selectedHospital.lat, selectedHospital.lon]
+        lastPosition = currentStart
+        vehicleMarker.setLatLng(currentStart)
+        highlightHospital(start)
+    }
+
+    if (selectedHospital && destinationHospital) {
+        drawRoute(
+            [selectedHospital.lat, selectedHospital.lon],
+            [destinationHospital.lat, destinationHospital.lon],
+            true
+        );
+    }
+
+    firstUpdate = true;
+
+    if (socket.readyState !== WebSocket.OPEN) {
+        console.warn("Socket not ready, retrying...");
+        setTimeout(startSimulation, 300);
+        return;
+    }
+
+    currentTransportID = generateTransportID();
+    document.getElementById("transport-id").innerText = currentTransportID;
+    
+    socket.send("START:" + organ + ":" + start + ":" + hospital);
+}
+
+function pauseSimulation() {
+    if (socket.readyState === WebSocket.OPEN) {
+        socket.send("PAUSE");
+    }
+}
+function resetSimulation() {
+    isRunning = false;
+
+    if (socket.readyState === WebSocket.OPEN) {
+        socket.send("RESET");
+    }
+    /* reset chart */
+    chart.data.labels = [];
+    chart.data.datasets[0].data = [];
+    chart.update();
+    /* clear event log */
+    document.getElementById("log").innerHTML = "";
+    /* reset sensor values */
+    document.getElementById("temp-value").innerText = "-";
+    document.getElementById("remaining").innerText = "-";
+    document.getElementById("prob").innerText = "-";
+    document.getElementById("distance").innerText = "-";
+    document.getElementById("destination").innerText = "-";
+    /* reset status */
+    document.getElementById("status-indicator").innerText = "SAFE";
+    document.getElementById("status-dot").className = "status-dot dot-safe";
+    /* reset panels */
+    document.getElementById("risk-summary").className = "";
+    document.getElementById("risk-summary").innerHTML =
+        "Status: - <br>Remaining Safe Minutes: - <br>Escalation Probability: -";
+    document.getElementById("actions").innerHTML =
+        "Waiting for system data...";
+
+    /* delay traffic */
+    document.getElementById("traffic-state").innerText = "-";
+    document.getElementById("traffic-delay").innerText = "-";
+
+    /* hide banners */
+    document.getElementById("reroute-alert").style.display = "none";
+    document.getElementById("traffic-alert").style.display = "none";
+    document.getElementById("completion-banner").style.display = "none";
+
+    /* reset map */
+    vehicleMarker.setLatLng(currentStart);
+    firstUpdate = true;
+    lastPosition = currentStart;
+    map.setView(currentStart, 10);
+    if (routeLine) {
+        map.removeLayer(routeLine);
+        routeLine = null; 
+    }
+    
+}
+</script>
+</body>
+</html>
